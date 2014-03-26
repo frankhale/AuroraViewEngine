@@ -32,7 +32,7 @@ using System.Web;
 using System.Xml.Linq;
 
 namespace ViewEngine
-{	
+{
 	#region INTERFACES AND ENUMS
 	// This determines at what point the view compiler runs the particular 
 	// transformation on the template.
@@ -68,8 +68,8 @@ namespace ViewEngine
 
 	internal class HeadSubstitution : IViewCompilerSubstitutionHandler
 	{
-		private static Regex headBlockRE = new Regex(@"\[\[(?<block>[\s\S]+?)\]\]", RegexOptions.Compiled);
-		private static string headDirective = "%%Head%%";
+		private static readonly Regex HeadBlockRe = new Regex(@"\[\[(?<block>[\s\S]+?)\]\]", RegexOptions.Compiled);
+		private const string HeadDirective = "%%Head%%";
 
 		public DirectiveProcessType Type { get; private set; }
 
@@ -80,11 +80,11 @@ namespace ViewEngine
 
 		public StringBuilder Process(StringBuilder content)
 		{
-			MatchCollection heads = headBlockRE.Matches(content.ToString());
+			MatchCollection heads = HeadBlockRe.Matches(content.ToString());
 
 			if (heads.Count > 0)
 			{
-				StringBuilder headSubstitutions = new StringBuilder();
+				var headSubstitutions = new StringBuilder();
 
 				foreach (Match head in heads)
 				{
@@ -92,10 +92,10 @@ namespace ViewEngine
 					content.Replace(head.Value, string.Empty);
 				}
 
-				content.Replace(headDirective, headSubstitutions.ToString());
+				content.Replace(HeadDirective, headSubstitutions.ToString());
 			}
 
-			content.Replace(headDirective, string.Empty);
+			content.Replace(HeadDirective, string.Empty);
 
 			return content;
 		}
@@ -103,27 +103,27 @@ namespace ViewEngine
 
 	internal class AntiForgeryTokenSubstitution : IViewCompilerSubstitutionHandler
 	{
-		private static string tokenName = "%%AntiForgeryToken%%";
-		private Func<string> createAntiForgeryToken;
+		private const string TokenName = "%%AntiForgeryToken%%";
+		private readonly Func<string> _createAntiForgeryToken;
 
 		public DirectiveProcessType Type { get; private set; }
 
 		public AntiForgeryTokenSubstitution(Func<string> createAntiForgeryToken)
 		{
-			this.createAntiForgeryToken = createAntiForgeryToken;
+			this._createAntiForgeryToken = createAntiForgeryToken;
 
 			Type = DirectiveProcessType.Render;
 		}
 
 		public StringBuilder Process(StringBuilder content)
 		{
-			var tokens = Regex.Matches(content.ToString(), tokenName)
+			var tokens = Regex.Matches(content.ToString(), TokenName)
 												.Cast<Match>()
 												.Select(m => new { Start = m.Index, End = m.Length })
 												.Reverse();
 
 			foreach (var t in tokens)
-				content.Replace(tokenName, createAntiForgeryToken(), t.Start, t.End);
+				content.Replace(TokenName, _createAntiForgeryToken(), t.Start, t.End);
 
 			return content;
 		}
@@ -131,7 +131,7 @@ namespace ViewEngine
 
 	internal class CommentSubstitution : IViewCompilerSubstitutionHandler
 	{
-		private static Regex commentBlockRE = new Regex(@"\@\@(?<block>[\s\S]+?)\@\@", RegexOptions.Compiled);
+		private static readonly Regex CommentBlockRe = new Regex(@"\@\@(?<block>[\s\S]+?)\@\@", RegexOptions.Compiled);
 
 		public DirectiveProcessType Type { get; private set; }
 
@@ -142,13 +142,13 @@ namespace ViewEngine
 
 		public StringBuilder Process(StringBuilder content)
 		{
-			return new StringBuilder(commentBlockRE.Replace(content.ToString(), string.Empty));
+			return new StringBuilder(CommentBlockRe.Replace(content.ToString(), string.Empty));
 		}
 	}
 
 	internal class MasterPageDirective : IViewCompilerDirectiveHandler
 	{
-		private static string tokenName = "%%View%%";
+		private const string TokenName = "%%View%%";
 		public DirectiveProcessType Type { get; private set; }
 
 		public MasterPageDirective()
@@ -158,25 +158,22 @@ namespace ViewEngine
 
 		public StringBuilder Process(ViewCompilerDirectiveInfo directiveInfo)
 		{
-			if (directiveInfo.Directive == "Master")
-			{
-				StringBuilder finalPage = new StringBuilder();
+			if (directiveInfo.Directive != "Master") return directiveInfo.Content;
 
-				string masterPageName = directiveInfo.DetermineKeyName(directiveInfo.Value);
-				string masterPageTemplate = directiveInfo.ViewTemplates
-																								 .FirstOrDefault(x => x.FullName == masterPageName)
-																								 .Template;
+			var finalPage = new StringBuilder();
 
-				directiveInfo.AddPageDependency(masterPageName);
+			var masterPageName = directiveInfo.DetermineKeyName(directiveInfo.Value);
+			var masterPageTemplate = directiveInfo.ViewTemplates
+				.FirstOrDefault(x => x.FullName == masterPageName)
+				.Template;
 
-				finalPage.Append(masterPageTemplate);
-				finalPage.Replace(tokenName, directiveInfo.Content.ToString());
-				finalPage.Replace(directiveInfo.Match.Groups[0].Value, string.Empty);
+			directiveInfo.AddPageDependency(masterPageName);
 
-				return finalPage;
-			}
+			finalPage.Append(masterPageTemplate);
+			finalPage.Replace(TokenName, directiveInfo.Content.ToString());
+			finalPage.Replace(directiveInfo.Match.Groups[0].Value, string.Empty);
 
-			return directiveInfo.Content;
+			return finalPage;
 		}
 	}
 
@@ -191,15 +188,14 @@ namespace ViewEngine
 
 		public StringBuilder Process(ViewCompilerDirectiveInfo directiveInfo)
 		{
-			if (directiveInfo.Directive == "Partial")
-			{
-				string partialPageName = directiveInfo.DetermineKeyName(directiveInfo.Value);
-				string partialPageTemplate = directiveInfo.ViewTemplates
-																									.FirstOrDefault(x => x.FullName == partialPageName)
-																									.Template;
+			if (directiveInfo.Directive != "Partial") return directiveInfo.Content;
 
-				directiveInfo.Content.Replace(directiveInfo.Match.Groups[0].Value, partialPageTemplate);
-			}
+			var partialPageName = directiveInfo.DetermineKeyName(directiveInfo.Value);
+			var partialPageTemplate = directiveInfo.ViewTemplates
+				.FirstOrDefault(x => x.FullName == partialPageName)
+				.Template;
+
+			directiveInfo.Content.Replace(directiveInfo.Match.Groups[0].Value, partialPageTemplate);
 
 			return directiveInfo.Content;
 		}
@@ -208,48 +204,52 @@ namespace ViewEngine
 	internal class HelperBundleDirective : IViewCompilerSubstitutionHandler
 	{
 		public DirectiveProcessType Type { get; private set; }
-		private static string helperBundlesDirective = "%%HelperBundles%%";
-		private Func<Dictionary<string, StringBuilder>> getHelperBundles;
-		private string sharedResourceFolderPath;
-		private static string cssIncludeTag = "<link href=\"{0}\" rel=\"stylesheet\" type=\"text/css\" />";
-		private static string jsIncludeTag = "<script src=\"{0}\" type=\"text/javascript\"></script>";
+		private const string HelperBundlesDirective = "%%HelperBundles%%";
+		private readonly Func<Dictionary<string, StringBuilder>> _getHelperBundles;
+		private readonly string _sharedResourceFolderPath;
+		private const string CssIncludeTag = "<link href=\"{0}\" rel=\"stylesheet\" type=\"text/css\" />";
+		private const string JsIncludeTag = "<script src=\"{0}\" type=\"text/javascript\"></script>";
 
 		public HelperBundleDirective(string sharedResourceFolderPath, Func<Dictionary<string, StringBuilder>> getHelperBundles)
 		{
 			Type = DirectiveProcessType.Render;
-			this.getHelperBundles = getHelperBundles;
-			this.sharedResourceFolderPath = sharedResourceFolderPath;
+			this._getHelperBundles = getHelperBundles;
+			this._sharedResourceFolderPath = sharedResourceFolderPath;
 		}
 
 		public string ProcessBundleLink(string bundlePath)
 		{
-			string tag = string.Empty;
-			string extension = Path.GetExtension(bundlePath).Substring(1).ToLower();
-			bool isAPath = bundlePath.Contains('/') ? true : false;
-			string modifiedBundlePath = bundlePath;
+			var tag = string.Empty;
+			var extension = Path.GetExtension(bundlePath).Substring(1).ToLower();
+			var isAPath = bundlePath.Contains('/') ? true : false;
+			var modifiedBundlePath = bundlePath;
 
 			if (!isAPath)
-				modifiedBundlePath = string.Join("/", sharedResourceFolderPath, extension, bundlePath);
+				modifiedBundlePath = string.Join("/", _sharedResourceFolderPath, extension, bundlePath);
 
-			if (extension == "css")
-				tag = string.Format(cssIncludeTag, modifiedBundlePath);
-			else if (extension == "js")
-				tag = string.Format(jsIncludeTag, modifiedBundlePath);
+			switch (extension)
+			{
+				case "css":
+					tag = string.Format(CssIncludeTag, modifiedBundlePath);
+					break;
+				case "js":
+					tag = string.Format(JsIncludeTag, modifiedBundlePath);
+					break;
+			}
 
 			return tag;
 		}
 
 		public StringBuilder Process(StringBuilder content)
 		{
-			if (content.ToString().Contains(helperBundlesDirective))
-			{
-				StringBuilder fileLinkBuilder = new StringBuilder();
+			if (!content.ToString().Contains(HelperBundlesDirective)) return content;
 
-				foreach (string bundlePath in getHelperBundles().Keys)
-					fileLinkBuilder.AppendLine(ProcessBundleLink(bundlePath));
+			var fileLinkBuilder = new StringBuilder();
 
-				content.Replace(helperBundlesDirective, fileLinkBuilder.ToString());
-			}
+			foreach (var bundlePath in _getHelperBundles().Keys)
+				fileLinkBuilder.AppendLine(ProcessBundleLink(bundlePath));
+
+			content.Replace(HelperBundlesDirective, fileLinkBuilder.ToString());
 
 			return content;
 		}
@@ -257,83 +257,91 @@ namespace ViewEngine
 
 	internal class BundleDirective : IViewCompilerDirectiveHandler
 	{
-		private bool debugMode;
-		private string sharedResourceFolderPath;
-		private Func<string, string[]> getBundleFiles;
-		private Dictionary<string, string> bundleLinkResults;
-		private static string cssIncludeTag = "<link href=\"{0}\" rel=\"stylesheet\" type=\"text/css\" />";
-		private static string jsIncludeTag = "<script src=\"{0}\" type=\"text/javascript\"></script>";
+		private readonly bool _debugMode;
+		private readonly string _sharedResourceFolderPath;
+		private readonly Func<string, string[]> _getBundleFiles;
+		private readonly Dictionary<string, string> _bundleLinkResults;
+		private const string CssIncludeTag = "<link href=\"{0}\" rel=\"stylesheet\" type=\"text/css\" />";
+		private const string JsIncludeTag = "<script src=\"{0}\" type=\"text/javascript\"></script>";
 
 		public DirectiveProcessType Type { get; private set; }
 
 		public BundleDirective(bool debugMode, string sharedResourceFolderPath,
 			Func<string, string[]> getBundleFiles)
 		{
-			this.debugMode = debugMode;
-			this.sharedResourceFolderPath = sharedResourceFolderPath;
-			this.getBundleFiles = getBundleFiles;
+			this._debugMode = debugMode;
+			this._sharedResourceFolderPath = sharedResourceFolderPath;
+			this._getBundleFiles = getBundleFiles;
 
-			bundleLinkResults = new Dictionary<string, string>();
+			_bundleLinkResults = new Dictionary<string, string>();
 
 			Type = DirectiveProcessType.Render;
 		}
 
 		public string ProcessBundleLink(string bundlePath)
 		{
-			string tag = string.Empty;
-			string extension = Path.GetExtension(bundlePath).Substring(1).ToLower();
-			bool isAPath = bundlePath.Contains('/') ? true : false;
-			string modifiedBundlePath = bundlePath;
+			var tag = string.Empty;
+			var extension = Path.GetExtension(bundlePath).Substring(1).ToLower();
+			var isAPath = bundlePath.Contains('/') ? true : false;
+			var modifiedBundlePath = bundlePath;
 
 			if (!isAPath)
-				modifiedBundlePath = string.Join("/", sharedResourceFolderPath, extension, bundlePath);
+				modifiedBundlePath = string.Join("/", _sharedResourceFolderPath, extension, bundlePath);
 
-			if (extension == "css")
-				tag = string.Format(cssIncludeTag, modifiedBundlePath);
-			else if (extension == "js")
-				tag = string.Format(jsIncludeTag, modifiedBundlePath);
+			switch (extension)
+			{
+				case "css":
+					tag = string.Format(CssIncludeTag, modifiedBundlePath);
+					break;
+				case "js":
+					tag = string.Format(JsIncludeTag, modifiedBundlePath);
+					break;
+			}
 
 			return tag;
 		}
 
 		public StringBuilder Process(ViewCompilerDirectiveInfo directiveInfo)
 		{
-			string bundleName = directiveInfo.Value;
+			var bundleName = directiveInfo.Value;
 
-			if (directiveInfo.Directive == "Include")
+			switch (directiveInfo.Directive)
 			{
-				directiveInfo.Content.Replace(directiveInfo.Match.Groups[0].Value, ProcessBundleLink(bundleName));
-			}
-			else if (directiveInfo.Directive == "Bundle")
-			{
-				StringBuilder fileLinkBuilder = new StringBuilder();
-
-				if (bundleLinkResults.ContainsKey(bundleName))
-				{
-					fileLinkBuilder.AppendLine(bundleLinkResults[bundleName]);
-				}
-				else
-				{
-					if (!string.IsNullOrEmpty(bundleName))
+				case "Include":
+					directiveInfo.Content.Replace(directiveInfo.Match.Groups[0].Value, ProcessBundleLink(bundleName));
+					break;
+				case "Bundle":
 					{
-						if (debugMode)
-						{
-							var bundles = getBundleFiles(bundleName);
+						var fileLinkBuilder = new StringBuilder();
 
-							if (bundles != null)
-							{
-								foreach (string bundlePath in getBundleFiles(bundleName))
-									fileLinkBuilder.AppendLine(ProcessBundleLink(bundlePath));
-							}
+						if (_bundleLinkResults.ContainsKey(bundleName))
+						{
+							fileLinkBuilder.AppendLine(_bundleLinkResults[bundleName]);
 						}
 						else
-							fileLinkBuilder.AppendLine(ProcessBundleLink(bundleName));
+						{
+							if (!string.IsNullOrEmpty(bundleName))
+							{
+								if (_debugMode)
+								{
+									var bundles = _getBundleFiles(bundleName);
+
+									if (bundles != null)
+									{
+										foreach (string bundlePath in _getBundleFiles(bundleName))
+											fileLinkBuilder.AppendLine(ProcessBundleLink(bundlePath));
+									}
+								}
+								else
+									fileLinkBuilder.AppendLine(ProcessBundleLink(bundleName));
+							}
+
+							_bundleLinkResults[bundleName] = fileLinkBuilder.ToString();
+						}
+
+						directiveInfo.Content.Replace(directiveInfo.Match.Groups[0].Value, fileLinkBuilder.ToString());
 					}
-
-					bundleLinkResults[bundleName] = fileLinkBuilder.ToString();
-				}
-
-				directiveInfo.Content.Replace(directiveInfo.Match.Groups[0].Value, fileLinkBuilder.ToString());
+					break;
 			}
 
 			return directiveInfo.Content;
@@ -351,17 +359,15 @@ namespace ViewEngine
 
 		public StringBuilder Process(ViewCompilerDirectiveInfo directiveInfo)
 		{
-			if (directiveInfo.Directive == "Placeholder")
-			{
-				Match placeholderMatch = (new Regex(string.Format(@"\[{0}\](?<block>[\s\S]+?)\[/{0}\]", directiveInfo.Value)))
-																 .Match(directiveInfo.Content.ToString());
+			if (directiveInfo.Directive != "Placeholder") return directiveInfo.Content;
 
-				if (placeholderMatch.Success)
-				{
-					directiveInfo.Content.Replace(directiveInfo.Match.Groups[0].Value, placeholderMatch.Groups["block"].Value);
-					directiveInfo.Content.Replace(placeholderMatch.Groups[0].Value, string.Empty);
-				}
-			}
+			var placeholderMatch = (new Regex(string.Format(@"\[{0}\](?<block>[\s\S]+?)\[/{0}\]", directiveInfo.Value)))
+				.Match(directiveInfo.Content.ToString());
+
+			if (!placeholderMatch.Success) return directiveInfo.Content;
+
+			directiveInfo.Content.Replace(directiveInfo.Match.Groups[0].Value, placeholderMatch.Groups["block"].Value);
+			directiveInfo.Content.Replace(placeholderMatch.Groups[0].Value, string.Empty);
 
 			return directiveInfo.Content;
 		}
@@ -382,35 +388,31 @@ namespace ViewEngine
 		public string FullName { get; set; }
 		public string Path { get; set; }
 		public string Template { get; set; }
-		public string TemplateMD5sum { get; set; }
+		public string TemplateMd5Sum { get; set; }
 		public string Result { get; set; }
 	}
 
 	internal class TemplateLoader
 	{
-		private string appRoot;
-		private string[] viewRoots;
+		private readonly string _appRoot;
+		private readonly string[] _viewRoots;
 
 		public TemplateLoader(string appRoot,
 													string[] viewRoots)
 		{
 			appRoot.ThrowIfArgumentNull();
 
-			this.appRoot = appRoot;
-			this.viewRoots = viewRoots;
+			this._appRoot = appRoot;
+			this._viewRoots = viewRoots;
 		}
 
 		public List<TemplateInfo> Load()
 		{
-			List<TemplateInfo> templates = new List<TemplateInfo>();
+			var templates = new List<TemplateInfo>();
 
-			foreach (string viewRoot in viewRoots)
+			foreach (var path in _viewRoots.Select(viewRoot => Path.Combine(_appRoot, viewRoot)).Where(Directory.Exists))
 			{
-				string path = Path.Combine(appRoot, viewRoot);
-
-				if (Directory.Exists(path))
-					foreach (FileInfo fi in new DirectoryInfo(path).GetFiles("*.html", SearchOption.AllDirectories))
-						templates.Add(Load(fi.FullName));
+				templates.AddRange(new DirectoryInfo(path).GetFiles("*.html", SearchOption.AllDirectories).Select(fi => Load(fi.FullName)));
 			}
 
 			return templates;
@@ -418,23 +420,23 @@ namespace ViewEngine
 
 		public TemplateInfo Load(string path)
 		{
-			string viewRoot = viewRoots.FirstOrDefault(x => path.StartsWith(Path.Combine(appRoot, x)));
+			var viewRoot = _viewRoots.FirstOrDefault(x => path.StartsWith(Path.Combine(_appRoot, x)));
 
 			if (string.IsNullOrEmpty(viewRoot)) return null;
 
-			DirectoryInfo rootDir = new DirectoryInfo(viewRoot);
+			var rootDir = new DirectoryInfo(viewRoot);
 
-			string extension = Path.GetExtension(path);
-			string templateName = Path.GetFileNameWithoutExtension(path);
-			string templateKeyName = path.Replace(rootDir.Parent.FullName, string.Empty)
-																	 .Replace(appRoot, string.Empty)
+			var extension = Path.GetExtension(path);
+			var templateName = Path.GetFileNameWithoutExtension(path);
+			var templateKeyName = path.Replace(rootDir.Parent.FullName, string.Empty)
+																	 .Replace(_appRoot, string.Empty)
 																	 .Replace(extension, string.Empty)
 																	 .Replace("\\", "/").TrimStart('/');
-			string template = File.ReadAllText(path);
+			var template = File.ReadAllText(path);
 
 			return new TemplateInfo()
 			{
-				TemplateMD5sum = template.CalculateMD5sum(),
+				TemplateMd5Sum = template.CalculateMD5sum(),
 				FullName = templateKeyName,
 				Name = templateName,
 				Path = path,
@@ -459,23 +461,23 @@ namespace ViewEngine
 	// the Html templates. All templates are compiled and cached.
 	internal class ViewCompiler : IViewCompiler
 	{
-		private List<IViewCompilerDirectiveHandler> directiveHandlers;
-		private List<IViewCompilerSubstitutionHandler> substitutionHandlers;
+		private readonly List<IViewCompilerDirectiveHandler> _directiveHandlers;
+		private readonly List<IViewCompilerSubstitutionHandler> _substitutionHandlers;
 
-		private List<TemplateInfo> viewTemplates;
-		private List<TemplateInfo> compiledViews;
-		private Dictionary<string, List<string>> viewDependencies;
-		private Dictionary<string, HashSet<string>> templateKeyNames;
+		private readonly List<TemplateInfo> _viewTemplates;
+		private readonly List<TemplateInfo> _compiledViews;
+		private readonly Dictionary<string, List<string>> _viewDependencies;
+		//private Dictionary<string, HashSet<string>> _templateKeyNames;
 
-		private static Regex directiveTokenRE = new Regex(@"(\%\%(?<directive>[a-zA-Z0-9]+)=(?<value>(\S|\.)+)\%\%)", RegexOptions.Compiled);
-		private static Regex tagRE = new Regex(@"{({|\||\!)([\w]+)(}|\!|\|)}", RegexOptions.Compiled);
-		private static string tagFormatPattern = @"({{({{|\||\!){0}(\||\!|}})}})";
-		private static string tagEncodingHint = "{|";
-		private static string markdownEncodingHint = "{!";
-		private static string unencodedTagHint = "{{";
+		private static readonly Regex DirectiveTokenRe = new Regex(@"(\%\%(?<directive>[a-zA-Z0-9]+)=(?<value>(\S|\.)+)\%\%)", RegexOptions.Compiled);
+		private static readonly Regex TagRe = new Regex(@"{({|\||\!)([\w]+)(}|\!|\|)}", RegexOptions.Compiled);
+		private const string TagFormatPattern = @"({{({{|\||\!){0}(\||\!|}})}})";
+		private const string TagEncodingHint = "{|";
+		private const string MarkdownEncodingHint = "{!";
+		private const string UnencodedTagHint = "{{";
 
-		private StringBuilder directive = new StringBuilder();
-		private StringBuilder value = new StringBuilder();
+		private readonly StringBuilder _directive = new StringBuilder();
+		private readonly StringBuilder _value = new StringBuilder();
 
 		public ViewCompiler(List<TemplateInfo> viewTemplates,
 												List<TemplateInfo> compiledViews,
@@ -489,46 +491,46 @@ namespace ViewEngine
 			directiveHandlers.ThrowIfArgumentNull();
 			substitutionHandlers.ThrowIfArgumentNull();
 
-			this.viewTemplates = viewTemplates;
-			this.compiledViews = compiledViews;
-			this.viewDependencies = viewDependencies;
-			this.directiveHandlers = directiveHandlers;
-			this.substitutionHandlers = substitutionHandlers;
+			this._viewTemplates = viewTemplates;
+			this._compiledViews = compiledViews;
+			this._viewDependencies = viewDependencies;
+			this._directiveHandlers = directiveHandlers;
+			this._substitutionHandlers = substitutionHandlers;
 
-			templateKeyNames = new Dictionary<string, HashSet<string>>();
+			//_templateKeyNames = new Dictionary<string, HashSet<string>>();
 		}
 
 		public List<TemplateInfo> CompileAll()
 		{
-			foreach (TemplateInfo vt in viewTemplates)
+			foreach (TemplateInfo vt in _viewTemplates)
 			{
 				if (!vt.FullName.Contains("Fragment"))
 					Compile(vt.FullName);
 				else
 				{
-					compiledViews.Add(new TemplateInfo()
+					_compiledViews.Add(new TemplateInfo()
 					{
 						FullName = vt.FullName,
 						Name = vt.Name,
 						Template = vt.Template,
 						Result = string.Empty,
-						TemplateMD5sum = vt.TemplateMD5sum,
+						TemplateMd5Sum = vt.TemplateMd5Sum,
 						Path = vt.Path
 					});
 				}
 			}
 
-			return compiledViews;
+			return _compiledViews;
 		}
 
 		public TemplateInfo Compile(string fullName)
 		{
-			TemplateInfo viewTemplate = viewTemplates.FirstOrDefault(x => x.FullName == fullName);
+			TemplateInfo viewTemplate = _viewTemplates.FirstOrDefault(x => x.FullName == fullName);
 
 			if (viewTemplate != null)
 			{
-				StringBuilder rawView = new StringBuilder(viewTemplate.Template);
-				StringBuilder compiledView = new StringBuilder();
+				var rawView = new StringBuilder(viewTemplate.Template);
+				var compiledView = new StringBuilder();
 
 				if (!viewTemplate.FullName.Contains("Fragment"))
 					compiledView = ProcessDirectives(fullName, rawView);
@@ -538,21 +540,21 @@ namespace ViewEngine
 
 				compiledView.Replace(compiledView.ToString(), Regex.Replace(compiledView.ToString(), @"^\s*$\n", string.Empty, RegexOptions.Multiline));
 
-				TemplateInfo view = new TemplateInfo()
+				var view = new TemplateInfo()
 				{
 					FullName = fullName,
 					Name = viewTemplate.Name,
 					Template = compiledView.ToString(),
 					Result = string.Empty,
-					TemplateMD5sum = viewTemplate.TemplateMD5sum
+					TemplateMd5Sum = viewTemplate.TemplateMd5Sum
 				};
 
-				TemplateInfo previouslyCompiled = compiledViews.FirstOrDefault(x => x.FullName == viewTemplate.FullName);
+				var previouslyCompiled = _compiledViews.FirstOrDefault(x => x.FullName == viewTemplate.FullName);
 
 				if (previouslyCompiled != null)
-					compiledViews.Remove(previouslyCompiled);
+					_compiledViews.Remove(previouslyCompiled);
 
-				compiledViews.Add(view);
+				_compiledViews.Add(view);
 
 				return view;
 			}
@@ -562,34 +564,34 @@ namespace ViewEngine
 
 		public TemplateInfo Render(string fullName, Dictionary<string, string> tags)
 		{
-			TemplateInfo compiledView = compiledViews.FirstOrDefault(x => x.FullName == fullName);
+			var compiledView = _compiledViews.FirstOrDefault(x => x.FullName == fullName);
 
 			if (compiledView != null)
 			{
-				StringBuilder compiledViewSB = new StringBuilder(compiledView.Template);
+				var compiledViewSb = new StringBuilder(compiledView.Template);
 
-				foreach (IViewCompilerSubstitutionHandler sub in substitutionHandlers.Where(x => x.Type == DirectiveProcessType.Render))
-					compiledViewSB = sub.Process(compiledViewSB);
+				compiledViewSb = _substitutionHandlers.Where(x => x.Type == DirectiveProcessType.Render)
+																							.Aggregate(compiledViewSb, (current, sub) => sub.Process(current));
 
-				foreach (IViewCompilerDirectiveHandler dir in directiveHandlers.Where(x => x.Type == DirectiveProcessType.Render))
+				foreach (var dir in _directiveHandlers.Where(x => x.Type == DirectiveProcessType.Render))
 				{
-					MatchCollection dirMatches = directiveTokenRE.Matches(compiledViewSB.ToString());
+					var dirMatches = DirectiveTokenRe.Matches(compiledViewSb.ToString());
 
 					foreach (Match match in dirMatches)
 					{
-						directive.Clear();
-						directive.Insert(0, match.Groups["directive"].Value);
+						_directive.Clear();
+						_directive.Insert(0, match.Groups["directive"].Value);
 
-						value.Clear();
-						value.Insert(0, match.Groups["value"].Value);
+						_value.Clear();
+						_value.Insert(0, match.Groups["value"].Value);
 
-						compiledViewSB = dir.Process(new ViewCompilerDirectiveInfo()
+						compiledViewSb = dir.Process(new ViewCompilerDirectiveInfo()
 						{
 							Match = match,
-							Directive = directive.ToString(),
-							Value = value.ToString(),
-							Content = compiledViewSB,
-							ViewTemplates = viewTemplates,
+							Directive = _directive.ToString(),
+							Value = _value.ToString(),
+							Content = compiledViewSb,
+							ViewTemplates = _viewTemplates,
 							AddPageDependency = null, // This is in the pipeline to be fixed
 							DetermineKeyName = null // This is in the pipeline to be fixed
 						});
@@ -598,42 +600,36 @@ namespace ViewEngine
 
 				if (tags != null)
 				{
-					StringBuilder tagSB = new StringBuilder();
+					var tagSb = new StringBuilder();
 
-					foreach (KeyValuePair<string, string> tag in tags)
+					foreach (var tag in tags)
 					{
-						tagSB.Clear();
-						tagSB.Insert(0, string.Format(tagFormatPattern, tag.Key));
+						tagSb.Clear();
+						tagSb.Insert(0, string.Format(TagFormatPattern, tag.Key));
 
-						Regex tempTagRE = new Regex(tagSB.ToString());
+						var tempTagRe = new Regex(tagSb.ToString());
+						var tagMatches = tempTagRe.Matches(compiledViewSb.ToString());
 
-						MatchCollection tagMatches = tempTagRE.Matches(compiledViewSB.ToString());
-
-						if (tagMatches != null)
+						foreach (Match m in tagMatches)
 						{
-							foreach (Match m in tagMatches)
-							{
-								if (!string.IsNullOrEmpty(tag.Value))
-								{
-									if (m.Value.StartsWith(unencodedTagHint))
-										compiledViewSB.Replace(m.Value, tag.Value.Trim());
-									else if (m.Value.StartsWith(tagEncodingHint))
-										compiledViewSB.Replace(m.Value, HttpUtility.HtmlEncode(tag.Value.Trim()));
-									else if (m.Value.StartsWith(markdownEncodingHint))
-										compiledViewSB.Replace(m.Value, new Markdown().Transform((tag.Value.Trim())));
-								}
-							}
+							if (string.IsNullOrEmpty(tag.Value)) continue;
+
+							if (m.Value.StartsWith(UnencodedTagHint))
+								compiledViewSb.Replace(m.Value, tag.Value.Trim());
+							else if (m.Value.StartsWith(TagEncodingHint))
+								compiledViewSb.Replace(m.Value, HttpUtility.HtmlEncode(tag.Value.Trim()));
+							else if (m.Value.StartsWith(MarkdownEncodingHint))
+								compiledViewSb.Replace(m.Value, new Markdown().Transform((tag.Value.Trim())));
 						}
 					}
 
-					MatchCollection leftoverMatches = tagRE.Matches(compiledViewSB.ToString());
+					var leftoverMatches = TagRe.Matches(compiledViewSb.ToString());
 
-					if (leftoverMatches != null)
-						foreach (Match match in leftoverMatches)
-							compiledViewSB.Replace(match.Value, string.Empty);
+					foreach (Match match in leftoverMatches)
+						compiledViewSb.Replace(match.Value, string.Empty);
 				}
 
-				compiledView.Result = compiledViewSB.ToString();
+				compiledView.Result = compiledViewSb.ToString();
 
 				return compiledView;
 			}
@@ -645,34 +641,34 @@ namespace ViewEngine
 		{
 			StringBuilder pageContent = new StringBuilder(rawView.ToString());
 
-			if (!viewDependencies.ContainsKey(fullViewName))
-				viewDependencies[fullViewName] = new List<string>();
+			if (!_viewDependencies.ContainsKey(fullViewName))
+				_viewDependencies[fullViewName] = new List<string>();
 
 			#region CLOSURES
 			Action<string> addPageDependency = x =>
 			{
-				if (!viewDependencies[fullViewName].Contains(x))
-					viewDependencies[fullViewName].Add(x);
+				if (!_viewDependencies[fullViewName].Contains(x))
+					_viewDependencies[fullViewName].Add(x);
 			};
 
 			Func<string, string> determineKeyName = name =>
 			{
-				return viewTemplates.Select(y => y.FullName)
+				return _viewTemplates.Select(y => y.FullName)
 														.Where(z => z.Contains("Shared/" + name))
 														.FirstOrDefault();
 			};
 
 			Action<IEnumerable<IViewCompilerDirectiveHandler>> performCompilerPass = x =>
 			{
-				MatchCollection dirMatches = directiveTokenRE.Matches(pageContent.ToString());
+				MatchCollection dirMatches = DirectiveTokenRe.Matches(pageContent.ToString());
 
 				foreach (Match match in dirMatches)
 				{
-					directive.Clear();
-					directive.Insert(0, match.Groups["directive"].Value);
+					_directive.Clear();
+					_directive.Insert(0, match.Groups["directive"].Value);
 
-					value.Clear();
-					value.Insert(0, match.Groups["value"].Value);
+					_value.Clear();
+					_value.Insert(0, match.Groups["value"].Value);
 
 					foreach (IViewCompilerDirectiveHandler handler in x)
 					{
@@ -680,10 +676,10 @@ namespace ViewEngine
 								handler.Process(new ViewCompilerDirectiveInfo()
 								{
 									Match = match,
-									Directive = directive.ToString(),
-									Value = value.ToString(),
+									Directive = _directive.ToString(),
+									Value = _value.ToString(),
 									Content = pageContent,
-									ViewTemplates = viewTemplates,
+									ViewTemplates = _viewTemplates,
 									DetermineKeyName = determineKeyName,
 									AddPageDependency = addPageDependency
 								}).ToString());
@@ -692,23 +688,23 @@ namespace ViewEngine
 			};
 			#endregion
 
-			performCompilerPass(directiveHandlers.Where(x => x.Type == DirectiveProcessType.Compile));
+			performCompilerPass(_directiveHandlers.Where(x => x.Type == DirectiveProcessType.Compile));
 
-			foreach (IViewCompilerSubstitutionHandler sub in substitutionHandlers.Where(x => x.Type == DirectiveProcessType.Compile))
+			foreach (IViewCompilerSubstitutionHandler sub in _substitutionHandlers.Where(x => x.Type == DirectiveProcessType.Compile))
 				pageContent = sub.Process(pageContent);
 
-			performCompilerPass(directiveHandlers.Where(x => x.Type == DirectiveProcessType.AfterCompile));
+			performCompilerPass(_directiveHandlers.Where(x => x.Type == DirectiveProcessType.AfterCompile));
 
 			return pageContent;
 		}
 
 		public void RecompileDependencies(string fullViewName)
 		{
-			var deps = viewDependencies.Where(x => x.Value.FirstOrDefault(y => y == fullViewName) != null);
+			var deps = _viewDependencies.Where(x => x.Value.FirstOrDefault(y => y == fullViewName) != null);
 
 			Action<string> compile = name =>
 			{
-				var template = viewTemplates.FirstOrDefault(x => x.FullName == name);
+				var template = _viewTemplates.FirstOrDefault(x => x.FullName == name);
 
 				if (template != null)
 					Compile(template.FullName);
@@ -801,11 +797,11 @@ namespace ViewEngine
 				viewTemplates.Remove(viewTemplates.Find(x => x.FullName == changedTemplate.FullName));
 				viewTemplates.Add(changedTemplate);
 
-				var cv = compiledViews.FirstOrDefault(x => x.FullName == changedTemplate.FullName && x.TemplateMD5sum != changedTemplate.TemplateMD5sum);
+				var cv = compiledViews.FirstOrDefault(x => x.FullName == changedTemplate.FullName && x.TemplateMd5Sum != changedTemplate.TemplateMd5Sum);
 
 				if (cv != null && !changedTemplate.FullName.Contains("Fragment"))
 				{
-					cv.TemplateMD5sum = changedTemplate.TemplateMD5sum;
+					cv.TemplateMd5Sum = changedTemplate.TemplateMd5Sum;
 					cv.Template = changedTemplate.Template;
 					cv.Result = string.Empty;
 				}
