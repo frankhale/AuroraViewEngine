@@ -2,7 +2,7 @@
 // This is the view engine from Aurora
 //
 // Frank Hale <frankhale@gmail.com>
-// 31 December 2013
+// 27 March 2014
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -219,8 +219,12 @@ namespace ViewEngine
 
 		public string ProcessBundleLink(string bundlePath)
 		{
-			var tag = string.Empty;
+			// ReSharper disable once PossibleNullReferenceException
 			var extension = Path.GetExtension(bundlePath).Substring(1).ToLower();
+
+			if (string.IsNullOrEmpty(extension)) return null;
+
+			var tag = string.Empty;
 			var isAPath = bundlePath.Contains('/') ? true : false;
 			var modifiedBundlePath = bundlePath;
 
@@ -280,8 +284,12 @@ namespace ViewEngine
 
 		public string ProcessBundleLink(string bundlePath)
 		{
-			var tag = string.Empty;
+			// ReSharper disable once PossibleNullReferenceException
 			var extension = Path.GetExtension(bundlePath).Substring(1).ToLower();
+
+			if (string.IsNullOrEmpty(extension)) return null;
+
+			var tag = string.Empty;
 			var isAPath = bundlePath.Contains('/') ? true : false;
 			var modifiedBundlePath = bundlePath;
 
@@ -436,7 +444,7 @@ namespace ViewEngine
 
 			return new TemplateInfo()
 			{
-				TemplateMd5Sum = template.CalculateMD5sum(),
+				TemplateMd5Sum = template.CalculateMd5Sum(),
 				FullName = templateKeyName,
 				Name = templateName,
 				Path = path,
@@ -467,7 +475,6 @@ namespace ViewEngine
 		private readonly List<TemplateInfo> _viewTemplates;
 		private readonly List<TemplateInfo> _compiledViews;
 		private readonly Dictionary<string, List<string>> _viewDependencies;
-		//private Dictionary<string, HashSet<string>> _templateKeyNames;
 
 		private static readonly Regex DirectiveTokenRe = new Regex(@"(\%\%(?<directive>[a-zA-Z0-9]+)=(?<value>(\S|\.)+)\%\%)", RegexOptions.Compiled);
 		private static readonly Regex TagRe = new Regex(@"{({|\||\!)([\w]+)(}|\!|\|)}", RegexOptions.Compiled);
@@ -491,18 +498,16 @@ namespace ViewEngine
 			directiveHandlers.ThrowIfArgumentNull();
 			substitutionHandlers.ThrowIfArgumentNull();
 
-			this._viewTemplates = viewTemplates;
-			this._compiledViews = compiledViews;
-			this._viewDependencies = viewDependencies;
-			this._directiveHandlers = directiveHandlers;
-			this._substitutionHandlers = substitutionHandlers;
-
-			//_templateKeyNames = new Dictionary<string, HashSet<string>>();
+			_viewTemplates = viewTemplates;
+			_compiledViews = compiledViews;
+			_viewDependencies = viewDependencies;
+			_directiveHandlers = directiveHandlers;
+			_substitutionHandlers = substitutionHandlers;
 		}
 
 		public List<TemplateInfo> CompileAll()
 		{
-			foreach (TemplateInfo vt in _viewTemplates)
+			foreach (var vt in _viewTemplates)
 			{
 				if (!vt.FullName.Contains("Fragment"))
 					Compile(vt.FullName);
@@ -527,119 +532,113 @@ namespace ViewEngine
 		{
 			TemplateInfo viewTemplate = _viewTemplates.FirstOrDefault(x => x.FullName == fullName);
 
-			if (viewTemplate != null)
+			if (viewTemplate == null) throw new FileNotFoundException(string.Format("Cannot find view : {0}", fullName));
+
+			var rawView = new StringBuilder(viewTemplate.Template);
+			var compiledView = new StringBuilder();
+
+			if (!viewTemplate.FullName.Contains("Fragment"))
+				compiledView = ProcessDirectives(fullName, rawView);
+
+			if (string.IsNullOrEmpty(compiledView.ToString()))
+				compiledView = rawView;
+
+			compiledView.Replace(compiledView.ToString(), Regex.Replace(compiledView.ToString(), @"^\s*$\n", string.Empty, RegexOptions.Multiline));
+
+			var view = new TemplateInfo()
 			{
-				var rawView = new StringBuilder(viewTemplate.Template);
-				var compiledView = new StringBuilder();
+				FullName = fullName,
+				Name = viewTemplate.Name,
+				Template = compiledView.ToString(),
+				Result = string.Empty,
+				TemplateMd5Sum = viewTemplate.TemplateMd5Sum
+			};
 
-				if (!viewTemplate.FullName.Contains("Fragment"))
-					compiledView = ProcessDirectives(fullName, rawView);
+			var previouslyCompiled = _compiledViews.FirstOrDefault(x => x.FullName == viewTemplate.FullName);
 
-				if (string.IsNullOrEmpty(compiledView.ToString()))
-					compiledView = rawView;
+			if (previouslyCompiled != null)
+				_compiledViews.Remove(previouslyCompiled);
 
-				compiledView.Replace(compiledView.ToString(), Regex.Replace(compiledView.ToString(), @"^\s*$\n", string.Empty, RegexOptions.Multiline));
+			_compiledViews.Add(view);
 
-				var view = new TemplateInfo()
-				{
-					FullName = fullName,
-					Name = viewTemplate.Name,
-					Template = compiledView.ToString(),
-					Result = string.Empty,
-					TemplateMd5Sum = viewTemplate.TemplateMd5Sum
-				};
-
-				var previouslyCompiled = _compiledViews.FirstOrDefault(x => x.FullName == viewTemplate.FullName);
-
-				if (previouslyCompiled != null)
-					_compiledViews.Remove(previouslyCompiled);
-
-				_compiledViews.Add(view);
-
-				return view;
-			}
-
-			throw new FileNotFoundException(string.Format("Cannot find view : {0}", fullName));
+			return view;
 		}
 
 		public TemplateInfo Render(string fullName, Dictionary<string, string> tags)
 		{
 			var compiledView = _compiledViews.FirstOrDefault(x => x.FullName == fullName);
 
-			if (compiledView != null)
+			if (compiledView == null) return null;
+
+			var compiledViewSb = new StringBuilder(compiledView.Template);
+
+			compiledViewSb = _substitutionHandlers.Where(x => x.Type == DirectiveProcessType.Render)
+				.Aggregate(compiledViewSb, (current, sub) => sub.Process(current));
+
+			foreach (var dir in _directiveHandlers.Where(x => x.Type == DirectiveProcessType.Render))
 			{
-				var compiledViewSb = new StringBuilder(compiledView.Template);
+				var dirMatches = DirectiveTokenRe.Matches(compiledViewSb.ToString());
 
-				compiledViewSb = _substitutionHandlers.Where(x => x.Type == DirectiveProcessType.Render)
-																							.Aggregate(compiledViewSb, (current, sub) => sub.Process(current));
-
-				foreach (var dir in _directiveHandlers.Where(x => x.Type == DirectiveProcessType.Render))
+				foreach (Match match in dirMatches)
 				{
-					var dirMatches = DirectiveTokenRe.Matches(compiledViewSb.ToString());
+					_directive.Clear();
+					_directive.Insert(0, match.Groups["directive"].Value);
 
-					foreach (Match match in dirMatches)
+					_value.Clear();
+					_value.Insert(0, match.Groups["value"].Value);
+
+					compiledViewSb = dir.Process(new ViewCompilerDirectiveInfo()
 					{
-						_directive.Clear();
-						_directive.Insert(0, match.Groups["directive"].Value);
-
-						_value.Clear();
-						_value.Insert(0, match.Groups["value"].Value);
-
-						compiledViewSb = dir.Process(new ViewCompilerDirectiveInfo()
-						{
-							Match = match,
-							Directive = _directive.ToString(),
-							Value = _value.ToString(),
-							Content = compiledViewSb,
-							ViewTemplates = _viewTemplates,
-							AddPageDependency = null, // This is in the pipeline to be fixed
-							DetermineKeyName = null // This is in the pipeline to be fixed
-						});
-					}
+						Match = match,
+						Directive = _directive.ToString(),
+						Value = _value.ToString(),
+						Content = compiledViewSb,
+						ViewTemplates = _viewTemplates,
+						AddPageDependency = null, // This is in the pipeline to be fixed
+						DetermineKeyName = null // This is in the pipeline to be fixed
+					});
 				}
-
-				if (tags != null)
-				{
-					var tagSb = new StringBuilder();
-
-					foreach (var tag in tags)
-					{
-						tagSb.Clear();
-						tagSb.Insert(0, string.Format(TagFormatPattern, tag.Key));
-
-						var tempTagRe = new Regex(tagSb.ToString());
-						var tagMatches = tempTagRe.Matches(compiledViewSb.ToString());
-
-						foreach (Match m in tagMatches)
-						{
-							if (string.IsNullOrEmpty(tag.Value)) continue;
-
-							if (m.Value.StartsWith(UnencodedTagHint))
-								compiledViewSb.Replace(m.Value, tag.Value.Trim());
-							else if (m.Value.StartsWith(TagEncodingHint))
-								compiledViewSb.Replace(m.Value, HttpUtility.HtmlEncode(tag.Value.Trim()));
-							else if (m.Value.StartsWith(MarkdownEncodingHint))
-								compiledViewSb.Replace(m.Value, new Markdown().Transform((tag.Value.Trim())));
-						}
-					}
-
-					var leftoverMatches = TagRe.Matches(compiledViewSb.ToString());
-
-					foreach (Match match in leftoverMatches)
-						compiledViewSb.Replace(match.Value, string.Empty);
-				}
-
-				compiledView.Result = compiledViewSb.ToString();
-
-				return compiledView;
 			}
 
-			return null;
+			if (tags != null)
+			{
+				var tagSb = new StringBuilder();
+
+				foreach (var tag in tags)
+				{
+					tagSb.Clear();
+					tagSb.Insert(0, string.Format(TagFormatPattern, tag.Key));
+
+					var tempTagRe = new Regex(tagSb.ToString());
+					var tagMatches = tempTagRe.Matches(compiledViewSb.ToString());
+
+					foreach (Match m in tagMatches)
+					{
+						if (string.IsNullOrEmpty(tag.Value)) continue;
+
+						if (m.Value.StartsWith(UnencodedTagHint))
+							compiledViewSb.Replace(m.Value, tag.Value.Trim());
+						else if (m.Value.StartsWith(TagEncodingHint))
+							compiledViewSb.Replace(m.Value, HttpUtility.HtmlEncode(tag.Value.Trim()));
+						else if (m.Value.StartsWith(MarkdownEncodingHint))
+							compiledViewSb.Replace(m.Value, new Markdown().Transform((tag.Value.Trim())));
+					}
+				}
+
+				var leftoverMatches = TagRe.Matches(compiledViewSb.ToString());
+
+				foreach (Match match in leftoverMatches)
+					compiledViewSb.Replace(match.Value, string.Empty);
+			}
+
+			compiledView.Result = compiledViewSb.ToString();
+
+			return compiledView;
 		}
 
 		public StringBuilder ProcessDirectives(string fullViewName, StringBuilder rawView)
 		{
-			StringBuilder pageContent = new StringBuilder(rawView.ToString());
+			var pageContent = new StringBuilder(rawView.ToString());
 
 			if (!_viewDependencies.ContainsKey(fullViewName))
 				_viewDependencies[fullViewName] = new List<string>();
@@ -651,16 +650,11 @@ namespace ViewEngine
 					_viewDependencies[fullViewName].Add(x);
 			};
 
-			Func<string, string> determineKeyName = name =>
-			{
-				return _viewTemplates.Select(y => y.FullName)
-														.Where(z => z.Contains("Shared/" + name))
-														.FirstOrDefault();
-			};
+			Func<string, string> determineKeyName = name => _viewTemplates.Select(y => y.FullName).FirstOrDefault(z => z.Contains("Shared/" + name));
 
-			Action<IEnumerable<IViewCompilerDirectiveHandler>> performCompilerPass = x =>
+			Func<StringBuilder, IEnumerable<IViewCompilerDirectiveHandler>, StringBuilder> performCompilerPass = (pc, x) =>
 			{
-				MatchCollection dirMatches = DirectiveTokenRe.Matches(pageContent.ToString());
+				var dirMatches = DirectiveTokenRe.Matches(pc.ToString());
 
 				foreach (Match match in dirMatches)
 				{
@@ -672,36 +666,32 @@ namespace ViewEngine
 
 					foreach (IViewCompilerDirectiveHandler handler in x)
 					{
-						pageContent.Replace(pageContent.ToString(),
+						pc.Replace(pc.ToString(),
 								handler.Process(new ViewCompilerDirectiveInfo()
 								{
 									Match = match,
 									Directive = _directive.ToString(),
 									Value = _value.ToString(),
-									Content = pageContent,
+									Content = pc,
 									ViewTemplates = _viewTemplates,
 									DetermineKeyName = determineKeyName,
 									AddPageDependency = addPageDependency
 								}).ToString());
 					}
 				}
+				return pc;
 			};
 			#endregion
 
-			performCompilerPass(_directiveHandlers.Where(x => x.Type == DirectiveProcessType.Compile));
-
-			foreach (IViewCompilerSubstitutionHandler sub in _substitutionHandlers.Where(x => x.Type == DirectiveProcessType.Compile))
-				pageContent = sub.Process(pageContent);
-
-			performCompilerPass(_directiveHandlers.Where(x => x.Type == DirectiveProcessType.AfterCompile));
+			pageContent = performCompilerPass(pageContent, _directiveHandlers.Where(x => x.Type == DirectiveProcessType.Compile));
+			pageContent = _substitutionHandlers.Where(x => x.Type == DirectiveProcessType.Compile).Aggregate(pageContent, (current, sub) => sub.Process(current));
+			pageContent = performCompilerPass(pageContent, _directiveHandlers.Where(x => x.Type == DirectiveProcessType.AfterCompile));
 
 			return pageContent;
 		}
 
 		public void RecompileDependencies(string fullViewName)
 		{
-			var deps = _viewDependencies.Where(x => x.Value.FirstOrDefault(y => y == fullViewName) != null);
-
 			Action<string> compile = name =>
 			{
 				var template = _viewTemplates.FirstOrDefault(x => x.FullName == name);
@@ -710,9 +700,11 @@ namespace ViewEngine
 					Compile(template.FullName);
 			};
 
-			if (deps.Count() > 0)
+			var deps = _viewDependencies.Where(x => x.Value.FirstOrDefault(y => y == fullViewName) != null).ToList();
+
+			if (deps.Any())
 			{
-				foreach (KeyValuePair<string, List<string>> view in deps)
+				foreach (var view in deps)
 					compile(view.Key);
 			}
 			else
@@ -722,14 +714,14 @@ namespace ViewEngine
 
 	internal class ViewEngine : IViewEngine
 	{
-		private string appRoot;
-		private List<IViewCompilerDirectiveHandler> dirHandlers;
-		private List<IViewCompilerSubstitutionHandler> substitutionHandlers;
-		private List<TemplateInfo> viewTemplates;
-		private List<TemplateInfo> compiledViews;
-		private Dictionary<string, List<string>> viewDependencies;
-		private TemplateLoader viewTemplateLoader;
-		private ViewCompiler viewCompiler;
+		private string _appRoot;
+		private readonly List<IViewCompilerDirectiveHandler> _dirHandlers;
+		private readonly List<IViewCompilerSubstitutionHandler> _substitutionHandlers;
+		private readonly List<TemplateInfo> _viewTemplates;
+		private readonly List<TemplateInfo> _compiledViews;
+		private readonly Dictionary<string, List<string>> _viewDependencies;
+		private readonly TemplateLoader _viewTemplateLoader;
+		private ViewCompiler _viewCompiler;
 
 		public bool CacheUpdated { get; private set; }
 
@@ -739,65 +731,61 @@ namespace ViewEngine
 											List<IViewCompilerSubstitutionHandler> substitutionHandlers,
 											string cache)
 		{
-			this.appRoot = appRoot;
+			this._appRoot = appRoot;
+			this._dirHandlers = dirHandlers;
+			this._substitutionHandlers = substitutionHandlers;
 
-			this.dirHandlers = dirHandlers;
-			this.substitutionHandlers = substitutionHandlers;
+			_viewTemplateLoader = new TemplateLoader(appRoot, viewRoots);
 
-			viewTemplateLoader = new TemplateLoader(appRoot, viewRoots);
+			var watcher = new FileSystemWatcher(appRoot, "*.html") { NotifyFilter = NotifyFilters.LastWrite };
 
-			FileSystemWatcher watcher = new FileSystemWatcher(appRoot, "*.html");
-
-			watcher.NotifyFilter = NotifyFilters.LastWrite;
 			watcher.Changed += new FileSystemEventHandler(OnChanged);
 			watcher.IncludeSubdirectories = true;
 			watcher.EnableRaisingEvents = true;
 
-			if (!(viewRoots.Count() >= 1))
+			if (!viewRoots.Any())
 				throw new ArgumentException("At least one view root is required to load view templates from.");
-
-			ViewCache viewCache = null;
 
 			if (!string.IsNullOrEmpty(cache))
 			{
-				viewCache = JsonConvert.DeserializeObject<ViewCache>(cache);
+				var viewCache = JsonConvert.DeserializeObject<ViewCache>(cache);
 
 				if (viewCache != null)
 				{
-					viewTemplates = viewCache.ViewTemplates;
-					compiledViews = viewCache.CompiledViews;
-					viewDependencies = viewCache.ViewDependencies;
+					_viewTemplates = viewCache.ViewTemplates;
+					_compiledViews = viewCache.CompiledViews;
+					_viewDependencies = viewCache.ViewDependencies;
 				}
 			}
 			else
 			{
-				compiledViews = new List<TemplateInfo>();
-				viewDependencies = new Dictionary<string, List<string>>();
-				viewTemplates = viewTemplateLoader.Load();
+				_compiledViews = new List<TemplateInfo>();
+				_viewDependencies = new Dictionary<string, List<string>>();
+				_viewTemplates = _viewTemplateLoader.Load();
 			}
 
-			viewCompiler = new ViewCompiler(viewTemplates, compiledViews, viewDependencies, dirHandlers, substitutionHandlers);
+			_viewCompiler = new ViewCompiler(_viewTemplates, _compiledViews, _viewDependencies, dirHandlers, substitutionHandlers);
 
-			if (!(compiledViews.Count() > 0))
-				compiledViews = viewCompiler.CompileAll();
+			if (!_compiledViews.Any())
+				_compiledViews = _viewCompiler.CompileAll();
 		}
 
 		private void OnChanged(object sender, FileSystemEventArgs e)
 		{
-			FileSystemWatcher fsw = sender as FileSystemWatcher;
+			var fsw = sender as FileSystemWatcher;
 
 			try
 			{
-				fsw.EnableRaisingEvents = false;
+				if (fsw != null) fsw.EnableRaisingEvents = false;
 
 				while (CanOpenForRead(e.FullPath) == false)
 					Thread.Sleep(1000);
 
-				var changedTemplate = viewTemplateLoader.Load(e.FullPath);
-				viewTemplates.Remove(viewTemplates.Find(x => x.FullName == changedTemplate.FullName));
-				viewTemplates.Add(changedTemplate);
+				var changedTemplate = _viewTemplateLoader.Load(e.FullPath);
+				_viewTemplates.Remove(_viewTemplates.Find(x => x.FullName == changedTemplate.FullName));
+				_viewTemplates.Add(changedTemplate);
 
-				var cv = compiledViews.FirstOrDefault(x => x.FullName == changedTemplate.FullName && x.TemplateMd5Sum != changedTemplate.TemplateMd5Sum);
+				var cv = _compiledViews.FirstOrDefault(x => x.FullName == changedTemplate.FullName && x.TemplateMd5Sum != changedTemplate.TemplateMd5Sum);
 
 				if (cv != null && !changedTemplate.FullName.Contains("Fragment"))
 				{
@@ -806,18 +794,18 @@ namespace ViewEngine
 					cv.Result = string.Empty;
 				}
 
-				viewCompiler = new ViewCompiler(viewTemplates, compiledViews, viewDependencies, dirHandlers, substitutionHandlers);
+				_viewCompiler = new ViewCompiler(_viewTemplates, _compiledViews, _viewDependencies, _dirHandlers, _substitutionHandlers);
 
 				if (cv != null)
-					viewCompiler.RecompileDependencies(changedTemplate.FullName);
+					_viewCompiler.RecompileDependencies(changedTemplate.FullName);
 				else
-					viewCompiler.Compile(changedTemplate.FullName);
+					_viewCompiler.Compile(changedTemplate.FullName);
 
 				CacheUpdated = true;
 			}
 			finally
 			{
-				fsw.EnableRaisingEvents = true;
+				if (fsw != null) fsw.EnableRaisingEvents = true;
 			}
 		}
 
@@ -827,9 +815,9 @@ namespace ViewEngine
 
 			return JsonConvert.SerializeObject(new ViewCache()
 			{
-				CompiledViews = compiledViews,
-				ViewTemplates = viewTemplates,
-				ViewDependencies = viewDependencies
+				CompiledViews = _compiledViews,
+				ViewTemplates = _viewTemplates,
+				ViewDependencies = _viewDependencies
 			}, Formatting.Indented);
 		}
 
@@ -838,7 +826,7 @@ namespace ViewEngine
 		{
 			try
 			{
-				using (FileStream file = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+				using (var file = new FileStream(filePath, FileMode.Open, FileAccess.Read))
 				{
 					file.Close();
 					return true;
@@ -854,20 +842,19 @@ namespace ViewEngine
 		{
 			string result = null;
 
-			var renderedView = viewCompiler.Render(fullName, tags);
+			var renderedView = _viewCompiler.Render(fullName, tags);
 
-			if (renderedView != null)
+			if (renderedView == null) return null;
+
+			try
 			{
-				try
-				{
-					result = XDocument.Parse(renderedView.Result).ToString();
-				}
-				catch
-				{
-					// Oops, Html is not well formed, probably tried to parse a fragment
-					// that had embedded string.Format placeholders or something weird.
-					result = renderedView.Result;
-				}
+				result = XDocument.Parse(renderedView.Result).ToString();
+			}
+			catch
+			{
+				// Oops, Html is not well formed, probably tried to parse a fragment
+				// that had embedded string.Format placeholders or something weird.
+				result = renderedView.Result;
 			}
 
 			return result;
@@ -880,25 +867,26 @@ namespace ViewEngine
 	{
 		public static void ThrowIfArgumentNull<T>(this T t, string message = null)
 		{
-			string argName = t.GetType().Name;
+			var argName = t.GetType().Name;
 
-			if (t == null)
+			// ReSharper disable once CompareNonConstrainedGenericWithNull
+			if (t is ValueType && t == null)
 				throw new ArgumentNullException(argName, message);
-			else if ((t is string) && (t as string) == string.Empty)
+			else if (t is string && string.IsNullOrEmpty(t as string))
 				throw new ArgumentException(argName, message);
 		}
 
 		// from: http://blogs.msdn.com/b/csharpfaq/archive/2006/10/09/how-do-i-calculate-a-md5-hash-from-a-string_3f00_.aspx
-		public static string CalculateMD5sum(this string input)
+		public static string CalculateMd5Sum(this string input)
 		{
 			MD5 md5 = System.Security.Cryptography.MD5.Create();
 			byte[] inputBytes = System.Text.Encoding.UTF8.GetBytes(input);
 			byte[] hash = md5.ComputeHash(inputBytes);
 
-			StringBuilder sb = new StringBuilder();
+			var sb = new StringBuilder();
 
-			for (int i = 0; i < hash.Length; i++)
-				sb.Append(hash[i].ToString("X2"));
+			foreach (byte t in hash)
+				sb.Append(t.ToString("X2"));
 
 			return sb.ToString();
 		}

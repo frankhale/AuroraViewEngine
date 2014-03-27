@@ -2,10 +2,9 @@
 
 The view engine that is used in the Aurora MVC web framework
 
-This is currently undergoing a rebirthing process to add middleware capability and to tune
-what is already present.
-
-Usage information will be provided at a later date.
+NOTE: I've pretty much completed work to fix issues that are being reported by
+      Resharper but I have not tested them yet. I will provide usage of this  
+      library once I complete testing. This should happen fairly shortly.
 
 ###License
 
@@ -23,4 +22,4 @@ GNU GPL version 3 - http://www.gnu.org/licenses/gpl-3.0.html
 ```
 
 Frank Hale - frank.hale@gmail.com
-26 March 2014
+27 March 2014
