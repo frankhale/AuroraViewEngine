@@ -1,10 +1,6 @@
-#ViewEngine
+#AuroraViewEngine
 
 The view engine that is used in the Aurora MVC web framework
-
-NOTE: I've pretty much completed work to fix issues that are being reported by
-      Resharper but I have not tested them yet. I will provide usage of this  
-      library once I complete testing. This should happen fairly shortly.
 
 ###License
 
@@ -22,4 +18,4 @@ GNU GPL version 3 - http://www.gnu.org/licenses/gpl-3.0.html
 ```
 
 Frank Hale - frank.hale@gmail.com
-27 March 2014
+30 March 2014

@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<package >
+	<metadata>
+		<id>AuroraViewEngine</id>
+		<version>2.0.0</version>
+		<title>Aurora View Engine</title>
+		<authors>Frank Hale</authors>
+		<owners>Frank Hale</owners>
+		<licenseUrl>http://www.gnu.org/licenses/gpl-3.0.html</licenseUrl>
+		<projectUrl>https://github.com/frankhale/AuroraViewEngine</projectUrl>
+		<iconUrl>https://github.com/frankhale/aurora/blob/master/aurora.png</iconUrl>
+		<requireLicenseAcceptance>false</requireLicenseAcceptance>
+		<description>A lightweight view engine for building dynamic HTML pages</description>
+		<summary>A lightweight view engine that ships with the Aurora MVC framework</summary>
+		<releaseNotes>Initial Nuget Packaging</releaseNotes>
+		<copyright>Copyright 2014</copyright>
+		<tags>C# MVC ASP.NET</tags>
+		<dependencies>
+			<dependency id="Newtonsoft.Json" version="6.0.1" />
+			<dependency id="MarkdownSharp" version="1.13.0" />
+		</dependencies>
+		</metadata>
+	<files>
+		<file src="README.md" target="README.md" />
+	</files>
+</package>
